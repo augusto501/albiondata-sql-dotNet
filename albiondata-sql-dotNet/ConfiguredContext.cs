@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using AlbionData.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,7 +16,7 @@ namespace albiondata_sql_dotNet
       // TODO: Add other database providers here
 
       // Use a large timeout since we have deletes that must do table scans
-      optionsBuilder.UseMySql(Program.SqlConnectionUrl,
+      optionsBuilder.UseSqlServer(Program.SqlConnectionUrl,
         opts => opts.CommandTimeout((int)TimeSpan.FromMinutes(5).TotalSeconds));
 #if DEBUG
       if (Program.Debug)
@@ -36,7 +37,7 @@ namespace albiondata_sql_dotNet
         entity.ToTable("market_orders_expired");
         entity.HasKey(e => e.Id);
         entity.HasAlternateKey(e => e.AlbionId)
-              .HasName("AlbionId");
+              .HasName("AlbionId1");
 
         entity.Property(e => e.AlbionId)
               .IsRequired();

@@ -18,11 +18,14 @@ namespace albiondata_sql_dotNet
   {
     private static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
 
-    [Option(Description = "NATS Url", ShortName = "n", ShowInHelpText = true)]
-    public static string NatsUrl { get; set; } = "nats://public:thenewalbiondata@albion-online-data.com:4222";
+    [Option(Description = "NATS Public Url", ShortName = "n", ShowInHelpText = true)]
+    public static string NatsPublicUrl { get; set; } = "";
+
+    [Option(Description = "NATS Private Url", ShortName = "np", ShowInHelpText = true)]
+    public static string NatsPrivateUrl { get; set; } = "nats://localhost:4222";
 
     [Option(Description = "SQL Connection Url", ShortName = "s", ShowInHelpText = true)]
-    public static string SqlConnectionUrl { get; set; } = "server=localhost;port=3306;database=albion;user=root;password=";
+    public static string SqlConnectionUrl { get; set; } = "data source=ESCRITORIO;initial catalog=albiondata;TrustServerCertificate=True;trusted_connection=true";
 
     [Option(Description = "Check Every x Minutes for expired orders", ShortName = "e", ShowInHelpText = true)]
     [Range(1, 1440)]
@@ -47,17 +50,38 @@ namespace albiondata_sql_dotNet
     private static readonly Timer expirationTimer = new Timer(ExpirationTask, null, Timeout.Infinite, Timeout.Infinite);
 
     #region Connections
-    private static readonly Lazy<IConnection> lazyNats = new Lazy<IConnection>(() =>
+    private static readonly Lazy<IConnection> lazyNatsPublic = new Lazy<IConnection>(() =>
     {
       var natsFactory = new ConnectionFactory();
-      return natsFactory.CreateConnection(NatsUrl);
+      if (NatsPublicUrl != string.Empty)
+      {
+        return natsFactory.CreateConnection(NatsPublicUrl);
+      }
+      else return null;
     });
 
-    public static IConnection NatsConnection
+    public static IConnection NatsPublicConnection
     {
       get
       {
-        return lazyNats.Value;
+        return lazyNatsPublic.Value;
+      }
+    }
+    private static readonly Lazy<IConnection> lazyNatsPrivate = new Lazy<IConnection>(() =>
+    {
+      var natsFactory = new ConnectionFactory();
+      if (NatsPrivateUrl != string.Empty)
+      {
+        return natsFactory.CreateConnection(NatsPrivateUrl);
+      }
+      else return null;
+    });
+
+    public static IConnection NatsPrivateConnection
+    {
+      get
+      {
+        return lazyNatsPrivate.Value;
       }
     }
     #endregion
@@ -94,31 +118,56 @@ namespace albiondata_sql_dotNet
         }
       }
 
-      logger.LogInformation($"Nats URL: {NatsUrl}");
-      logger.LogInformation($"NATS Connected, ID: {NatsConnection.ConnectedId}");
+      if (NatsPublicConnection != null)
+      {
+        logger.LogInformation($"Nats Public URL: {NatsPublicUrl}");
+        logger.LogInformation($"NATS Public Connected, ID: {NatsPublicConnection?.ConnectedId}");
 
-      var incomingMarketOrders = NatsConnection.SubscribeAsync(marketOrdersDedupedBulk);
-      var incomingMarketHistories = NatsConnection.SubscribeAsync(marketHistoriesDeduped);
-      var incomingGoldData = NatsConnection.SubscribeAsync(goldDataDeduped);
+        var incomingPublicMarketOrders = NatsPublicConnection.SubscribeAsync(marketOrdersDedupedBulk);
+        var incomingPublicMarketHistories = NatsPublicConnection.SubscribeAsync(marketHistoriesDeduped);
+        var incomingPublicGoldData = NatsPublicConnection.SubscribeAsync(goldDataDeduped);
 
-      incomingMarketOrders.MessageHandler += HandleMarketOrderBulk;
-      incomingMarketHistories.MessageHandler += HandleMarketHistory;
-      incomingGoldData.MessageHandler += HandleGoldData;
+        incomingPublicMarketOrders.MessageHandler += HandleMarketOrderBulk;
+        incomingPublicMarketHistories.MessageHandler += HandleMarketHistory;
+        incomingPublicGoldData.MessageHandler += HandleGoldData;
 
-      incomingMarketOrders.Start();
-      logger.LogInformation("Listening for Market Order Data");
-      incomingMarketHistories.Start();
-      logger.LogInformation("Listening for Market History Data");
-      incomingGoldData.Start();
-      logger.LogInformation("Listening for Gold Data");
+        incomingPublicMarketOrders.Start();
+        logger.LogInformation("Listening for Market Order Data in Public Nats");
+        incomingPublicMarketHistories.Start();
+        logger.LogInformation("Listening for Market History Data in Public Nats");
+        incomingPublicGoldData.Start();
+        logger.LogInformation("Listening for Gold Data in Public Nats");
+      }
 
-      logger.LogInformation($"Checking Every {ExpireCheckMinutes} Minutes for expired orders.");
-      logger.LogInformation($"Deleting orders after {MaxAgeHours} hours");
+      if (NatsPrivateConnection != null)
+      {
+        logger.LogInformation($"Nats Private URL: {NatsPrivateUrl}");
+        logger.LogInformation($"NATS Private Connected, ID: {NatsPrivateConnection.ConnectedId}");
+
+        var incomingPrivateMarketOrders = NatsPrivateConnection.SubscribeAsync(marketOrdersDedupedBulk);
+        var incomingPrivateMarketHistories = NatsPrivateConnection.SubscribeAsync(marketHistoriesDeduped);
+        var incomingPrivateGoldData = NatsPrivateConnection.SubscribeAsync(goldDataDeduped);
+
+        incomingPrivateMarketOrders.MessageHandler += HandleMarketOrderBulk;
+        incomingPrivateMarketHistories.MessageHandler += HandleMarketHistory;
+        incomingPrivateGoldData.MessageHandler += HandleGoldData;
+
+        incomingPrivateMarketOrders.Start();
+        logger.LogInformation("Listening for Market Order Data in Private Nats");
+        incomingPrivateMarketHistories.Start();
+        logger.LogInformation("Listening for Market History Data in Private Nats");
+        incomingPrivateGoldData.Start();
+        logger.LogInformation("Listening for Gold Data in Private Nats");
+
+        logger.LogInformation($"Checking Every {ExpireCheckMinutes} Minutes for expired orders.");
+        logger.LogInformation($"Deleting orders after {MaxAgeHours} hours");
+      }
 
       expirationTimer.Change(TimeSpan.Zero, TimeSpan.FromMinutes(ExpireCheckMinutes));
 
       quitEvent.WaitOne();
-      NatsConnection.Close();
+      NatsPublicConnection?.Close();
+      NatsPrivateConnection?.Close();
     }
 
     private static void HandleMarketOrderBulk(object sender, MsgHandlerEventArgs args)
@@ -220,6 +269,7 @@ namespace albiondata_sql_dotNet
               SilverAmount = marketHistoryUpdate.SilverAmount,
               Timestamp = historyDate
             };
+
             context.MarketHistories.Add(dbHistory);
           }
           else
