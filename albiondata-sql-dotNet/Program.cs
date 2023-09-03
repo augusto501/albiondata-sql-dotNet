@@ -19,7 +19,7 @@ namespace albiondata_sql_dotNet
     private static void Main(string[] args) => CommandLineApplication.Execute<Program>(args);
 
     [Option(Description = "NATS Public Url", ShortName = "n", ShowInHelpText = true)]
-    public static string NatsPublicUrl { get; set; } = "";
+    public static string NatsPublicUrl { get; set; } = "nats://public:thenewalbiondata@nats.albion-online-data.com:4222";
 
     [Option(Description = "NATS Private Url", ShortName = "np", ShowInHelpText = true)]
     public static string NatsPrivateUrl { get; set; } = "nats://localhost:4222";
